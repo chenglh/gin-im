@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+<!--js include-->
+{{template "/chat/head.html"}}
+</head>
+<body>
+<!--底部菜单-->
+{{template "/chat/tabmenu.html"}}
+<header class="mui-bar mui-bar-nav">
+</header>
+<div class="mui-content" id="pageapp">
+    <!--联系人-->
+    {{template "/chat/concat.html"}}
+    <!--群聊-->
+    {{template "/chat/group.html"}}
+    <!--个人中心-->
+    {{template "/chat/profile.html"}}
+    <!--聊天主界面-->
+    {{template "/chat/main.html"}}
+    <!--创建群主界面-->
+    {{template "/chat/createcom.html"}}
+    <!--修改信息主界面-->
+    {{template "/chat/userinfo.html"}}
+</div>
+</body>
+</html>
+{{template "/chat/foot.html"}}

@@ -1,0 +1,667 @@
+{{define "/chat/foot.html"}}
+<script>
+    function upload(dom) {
+        uploadfile("v1/user/upload", dom, function (res) {
+            if (res.code == 0) { // 上传成功后，调用 sendpicmsg 函数
+                app.sendpicmsg(res.data)
+            }
+        })
+    }
+    //上传图片(创建群时)
+    function uploadthis(dom) {
+        uploadfile("v1/user/upload", dom, function (res) {
+            if (res.code == 0) {
+                app.com.icon = res.data;
+                console.log(res.data);
+            }
+        })
+    }
+    //上传图片(更新用户信息时)
+    function uploadUserInfo(dom) {
+        uploadfile("v1/user/upload", dom, function (res) {
+            if (res.code == 0) {
+                app.info.icon = res.data;
+                console.log(res.data);
+            }
+        })
+    }
+
+    function userid() {
+        return parseInt(util.parseQuery("userid"))
+    }
+    var app = new Vue(
+        {
+            el: "#pageapp",
+            data: {
+                usermap: {},
+                friends: [],
+                communitys: [],
+                profile: {
+                    avatar: "",
+                    nickname: "",
+                    memo: "",
+                },
+                webSocket: {},
+                win: "main",
+                com: {
+                    "ownerId": "",
+                    "icon": "",
+                    "cate": "",
+                    "name": "",
+                    "memo": "",
+                },
+                //用户信息
+                info: {
+                    "id": "",
+                    "icon": "",
+                    "name": "",
+                },
+                isDisable: true,
+                isLoadMore: false,
+                start: 0,
+                end: 9,
+                txtmsg: "",
+                panelstat: "kbord",
+                txtstat: "kbord",
+                title: "",
+                otherAvatar: '',
+                doutu: {
+                    config: {
+                        "baseurl": "/asset/plugins/doutu",
+                        "pkgids": ["mkgif", "emoj"]
+                    },
+                    packages: [],
+                    choosed: { "pkgid": "emoj", "assets": [], "size": "small" }
+                },
+                msglist: [],
+                isReadRedisMsg: [],  //是否已读取某个用户的缓存消息
+                msgcontext: {
+                    dstobj: -1,
+                    msg_type: -1,
+                    create_at: new Date().getTime(),
+                    ownerid: userid()
+                },
+                plugins: [
+                    {
+                        icon: "icon-tupian",
+                        name: "照片",
+                        id: "upload",
+                        slot: "<input accept=\"image/gif,image/jpeg,,image/png\" type=\"file\" onchange=\"upload(this)\" class='upload' />"
+                    },
+                    {
+                        icon: "icon-paizhao",
+                        name: "拍照",
+                        id: "camera",
+                        slot: "<input accept=\"image/*\" capture=\"camera\" type=\"file\" onchange=\"upload(this)\" class='upload' />"
+                    },
+                    {
+                        icon: "icon-yuyin",
+                        name: "语音",
+                        id: "audiocall"
+                    },
+                    {
+                        icon: "icon-shipin",
+                        name: "视频",
+                        id: "videocall"
+                    },
+                    {
+                        icon: "icon-hongbao",
+                        name: "红包",
+                        id: "redpackage"
+                    },
+                    {
+                        icon: "icon-zhuanzhang",
+                        name: "转账",
+                        id: "exchange"
+                    },
+                    {
+                        icon: "icon-daohangdizhi",
+                        name: "地址",
+                        id: "address"
+                    },
+                    {
+                        icon: "icon-zhanghu",
+                        name: "名片",
+                        id: "person"
+                    }
+
+                ],
+                timer: 0,
+                recorder: {},
+                allChunks: [],
+                iscomplete: false,
+                duration: 0,
+                showprocess: false,
+            },
+            created: function () {
+                this.loadfriends();
+                this.loadcommunitys();
+                this.loaddoutures();
+                setInterval(this.heartbeat, 20 * 1000); // 心跳检测，20s
+                var user = userInfo()
+                //初始化websocket
+                this.initwebsocket()
+                this.initUser();
+
+            },
+            mounted: function () {
+
+            },
+            methods: {
+                initUser() {
+                    let userInfo = JSON.parse(sessionStorage.getItem('userinfo') || '{}');
+                    this.info.icon = userInfo.Avatar;
+                    this.info.name = userInfo.Name;
+                    this.info.id = userInfo.ID;
+                    this.profile.avatar = userInfo.Avatar;
+                    this.profile.nickname = userInfo.Name;
+                },
+                playaudio: function (url) {
+                    document.getElementById('audio4play').src = url;
+                    document.getElementById('audio4play').play();
+                },
+                startrecorder: function () {
+                    let audioTarget = document.getElementById('audio');
+                    var types = ["video/webm",
+                        "audio/webm",
+                        "video/webm\;codecs=vp8",
+                        "video/webm\;codecs=daala",
+                        "video/webm\;codecs=h264",
+                        "audio/webm\;codecs=opus",
+                        "video/mpeg"];
+                    var suporttype = "";
+                    for (var i in types) {
+                        if (MediaRecorder.isTypeSupported(types[i])) {
+                            suporttype = types[i];
+                        }
+                    }
+                    if (!suporttype) {
+                        mui.toast("编码不支持")
+                        return;
+                    }
+
+                    this.duration = new Date().getTime();
+                    // audio 音频 = true 表示要采集语音信息；video 摄像头，表示采集视频信息
+                    navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+                        .then(function (stream) {
+                            this.showprocess = true
+                            this.recorder = new MediaRecorder(stream); // 创建一个流对象
+                            this.recorder.start(); // 启动
+                            audioTarget.srcObject = stream;
+                            // 配置一个是否可用的回调函数
+                            this.recorder.ondataavailable = (event) => {
+                                //console.log("ondataavailable");
+                                // 把数据 event.data，保存的后续都 上传给服务端进行处理
+                                uploadblob("v1/user/upload", event.data, ".mp3", res => {
+                                    // 语音的长度，前端收集开始到结束计算出来的！
+                                    var duration = Math.ceil((new Date().getTime() - this.duration) / 1000);
+                                    this.sendaudiomsg(res.data, duration);// 前端展示
+                                })
+                                stream.getTracks().forEach(function (track) {
+                                    track.stop();
+                                });
+                                this.showprocess = false
+                            }
+                        }.bind(this)).
+                        catch(function (err) {
+                            console.log(err)
+                            mui.toast(err)
+                            this.showprocess = false
+                        }.bind(this));
+                },
+                stoprecorder: function () {
+                    if (typeof this.recorder.stop == "function") {
+                        this.recorder.stop();
+                    }
+                    this.showprocess = false
+                    console.log("stoprecorder")
+                },
+                dispatchplugin: function (item) {
+                    switch (item.id) {
+                        case "upload":
+                        case "camera":
+                            break;
+                        default:
+                            mui.toast("系统暂不支持,请自行扩展")
+                    }
+                },
+                reset: function () {
+                    this.panelstat = "kbord";
+                    this.txtstat = "kbord";
+                    this.txtmsg = "";
+                },
+                createmsgcontext: function () {
+                    return JSON.parse(JSON.stringify(this.msgcontext))
+                },
+                loaddoutures: function () {
+                    var res = [];
+                    var config = this.doutu.config;
+                    for (var i in config.pkgids) {
+                        res[config.pkgids[i]] = (config.baseurl + "/" + config.pkgids[i] + "/info.json")
+                    }
+                    var that = this;
+                    for (var id in res) {
+                        this.$http.get(res[id]).then(response => {
+                            pkginfo = response.data
+                            var baseurl = config.baseurl + "/" + pkginfo.id + "/"
+                            // console.log("post res[i]",id,res[id],pkginfo)
+                            for (var j in pkginfo.assets) {
+                                pkginfo.assets[j] = baseurl + pkginfo.assets[j];
+                            }
+                            pkginfo.icon = baseurl + pkginfo.icon;
+                            that.doutu.packages.push(pkginfo)
+                            if (that.doutu.choosed.pkgid == pkginfo.id) {
+                                that.doutu.choosed.assets = pkginfo.assets;
+                            }
+                        })
+                    }
+                },
+                showweixin: function () {
+                    mui.alert("请加微信号msb-shenzhuan索取")
+                },
+                showmsg: function (user, msg, isReverse, isFirst) {
+                    //console.log(">>>>>>>>>>>", user)
+                    //console.log(">>>>>>>>>>>", msg)
+                    var data = {}
+                    data.ismine = userid() == msg.ownerid;
+                    //console.log(data.ismine,userid(), msg.ownerid) // 打印参考数据
+                    data.user = user;
+                    data.msg = msg;
+                    console.log(this.msglist)
+                    if (isReverse) {
+                        this.msglist = [data].concat(this.msglist);
+                    } else {
+                        //首次获取消息渲染
+                        if (isFirst) {
+                            this.msglist = [data].concat(this.msglist);
+                            //下拉获取消息渲染
+                        } else {
+                            this.msglist = this.msglist.concat(data)
+                        }
+                    }
+                    this.reset();
+                    var that = this;
+                    that.timer = setTimeout(function () {
+                        window.scrollTo(0, document.getElementById("convo").offsetHeight);
+                        if (!isReverse) {
+                            let scroll = document.querySelector("#convo .mui-scroll-wrapper").offsetHeight;
+                            let inner = document.querySelector("#convo .mui-scroll").offsetHeight;
+                            let y = scroll - inner - 80;
+                            let transform = document.querySelector("#convo .mui-scroll").style.transform;
+                            document.querySelector("#convo .mui-scroll").style.transform = 'translateY(' + y + 'px)';
+                        } else {
+                            document.querySelector("#convo .mui-scroll").style.transform = 'translateY(' + 0 + 'px)';
+                        }
+
+                        clearTimeout(that.timer)
+                    }, 100)
+                },
+                startrecord: function () {
+
+                },
+                // 第一种：文本单聊
+                sendtxtmsg: function (txt) {
+                    if (this.isDisable) {
+                        this.setTimeFlag()
+                        //{"dstobj":3,"msg_type":1,"create_at":1683874110309,"ownerid":2,"media":1,"content":"你好，朋友好久不见！"}
+                        var msg = this.createmsgcontext();
+                        msg.media = 1;
+                        msg.content = txt;
+                        if (msg.msg_type == 1) {
+                            this.showmsg(userInfo(), msg);
+                        }
+                        console.log("发送文本数据 " + JSON.stringify(msg));
+                        this.webSocket.send(JSON.stringify(msg))
+                    }
+                },
+                // 第二种：发送图片资源，【先调用接口把图片上传，返回picurl，再把信息数据发送给服务器进行转发】
+                sendpicmsg: function (picurl) {
+                    if (this.isDisable) {
+                        this.setTimeFlag()
+                        //{"dstobj":2,"msg_type":1,"create_at":1683874107309,"ownerid":3,"media":4,"url":"/asset/upload/16838741281298498081.png"}
+                        var msg = this.createmsgcontext();
+                        msg.media = 4;
+                        msg.url = picurl;
+                        if (msg.msg_type == 1) {
+                            this.showmsg(userInfo(), msg);
+                        }
+                        console.log("发送图片数据 " + JSON.stringify(msg));
+                        this.webSocket.send(JSON.stringify(msg))
+                    }
+                },
+                // 第三种：语音信息，【也是先上传语音，再调用发送消息函数】
+                sendaudiomsg: function (url, num) {
+                    if (this.isDisable) {
+                        this.setTimeFlag()
+                        //{"dstobj":3,"msg_type":1,"create_at":1683875997271,"ownerid":2,"media":3,"url":"/asset/upload/xxx.mp3","amount":5}
+                        var msg = this.createmsgcontext();
+                        msg.media = 3;
+                        msg.url = url;
+                        msg.amount = num;
+                        if (msg.msg_type == 1) {
+                            this.showmsg(userInfo(), msg);
+                        }
+                        //console.log("sendaudiomsg",this.msglist);
+                        this.webSocket.send(JSON.stringify(msg))
+                    }
+                },
+                scrollConcat() {
+                    console.log(123)
+                },
+                closePanel() {
+                    this.panelstat = 'kbord';
+                },
+                // 单聊页面
+                singlemsg: function (user) {
+                    this.start = 0;
+                    this.end = 9;
+                    if (this.isDisable) {
+                        // 首次读取某个用户的消息记录
+                        if (this.isReadRedisMsg.filter(item => item === user.ID).length <= 0) {
+                            post("v1/chat/message", { userIdA: userid(), userIdB: user.userid, start: this.start, end: this.end, isRev: false }, function (res) {
+                                //循环读取的消息记录 并显示
+                                for (var i in res.rows) {
+                                    this.showmsg(user, JSON.parse(res.rows[i]), false, true)
+                                }
+                            }.bind(this))
+                            this.isReadRedisMsg.push(user.ID)
+                        }
+
+                        this.setTimeFlag()
+                        //console.log(user)
+                        this.win = "single";
+                        this.title = "和" + user.nickName + "聊天中";
+                        this.otherAvatar = user.HeadUrl;
+                        this.msgcontext.dstobj = parseInt(user.userid);
+                        this.msgcontext.msg_type = 1;
+                        mui('.mui-scroll-wrapper').scroll({
+                            scrollY: true, //是否竖向滚动
+                            scrollX: false, //是否横向滚动
+                            startX: 0, //初始化时滚动至x
+                            startY: 0, //初始化时滚动至y
+                            indicators: true, //是否显示滚动条
+                            deceleration: 0.0006, //阻尼系数,系数越小滑动越灵敏
+                            bounce: true //是否启用回弹
+                        });
+                        //下拉获取历史消息记录
+                        document.querySelector('.mui-scroll-wrapper').addEventListener('scroll', (e) => {
+                            let translate = e.target.style?.transform?.match(/translate3d\(\d+px,\s*(\d+)px,\s*(\d+)px\)/i);
+                            if (translate && translate.length > 1) {
+                                if (translate[1] > 0 && this.isLoadMore == false) {
+                                    this.isLoadMore = true;
+                                    this.start = this.end + 1;
+                                    this.end = this.end + 2;
+                                    console.log(user)
+                                    post("v1/chat/message", { useridA: userid(), useridB: user.userid, start: this.start, end: this.end, isRev: false }, function (res) {
+                                        //循环读取的消息记录 并显示
+                                        for (var i in res.Total) {
+                                            this.showmsg(user, JSON.parse(res.Total[i]), true)
+                                        }
+                                        setTimeout(() => {
+                                            this.isLoadMore = false;
+                                        }, 300);
+                                    }.bind(this))
+                                    this.isReadRedisMsg.push(user.ID)
+                                }
+                            }
+                        })
+                    }
+                },
+                //群聊的初始化
+                groupmsg: function (group) {
+                    console.log(group+ '----->')
+                    if (this.isDisable) {
+                        this.start = 0;
+                        this.end = 9;
+
+                        post("v1/chat/message", {
+                            userIdA: userid(),
+                            userIdB: parseInt(group.id),
+                            msgType:2,
+                            start: this.start,
+                            end: this.end,
+                            isRev: false
+                        }, function (res) {
+                            //循环读取的消息记录 并显示
+                            for (var i in res.rows) {
+                                this.showmsg(group, JSON.parse(res.rows[i]), false, true)
+                            }
+                        }.bind(this))
+
+                        this.setTimeFlag()
+                        this.win = "group";
+                        this.title = group.name;
+                        this.msgcontext.dstobj = parseInt(group.id);
+                        this.msgcontext.msg_type = 2;
+                    }
+                },
+                loaduserinfo: function (userid, cb) {
+                    userid = "" + userid;
+                    console.log(">>>> " + userid)
+                    var userinfo = this.usermap[userid];
+                    if (!userinfo) {
+                        post("v1/user/find", { id: parseInt(userid) }, function (res) {
+                            cb(res.data);
+                            this.usermap[userid] = res.data;
+                        }.bind(this))
+                    } else {
+                        cb(userinfo)
+                    }
+                },
+                // onmessage属性：用于指定收到服务器数据后的回调函数
+                onmessage: function (data) {
+                    this.loaduserinfo(data.ownerid, function (user) {
+                        this.showmsg(user, data)
+                        // this.friends.map((item) => {
+                        //     if (item.userid == data.userid) {
+                        //         // 1文字 2表情包 3图片 4音频
+                        //         if (data.media === 1) {
+                        //             item.memo = data.content
+                        //         } else if (data.Media === 2) {
+                        //             item.memo = data.url
+                        //         } else if (data.media === 3) {
+                        //             item.memo = "[语音]"
+                        //         } else if (data.media === 4) {
+                        //             item.memo = "[图片]"
+                        //         }
+                        //     }
+                        // })
+                    }.bind(this))
+                },
+                initwebsocket: function () {
+                    var url = "ws://" + location.host + "/v1/chat?userid=" + userid() + "&token=" + util.parseQuery("token");
+                    this.webSocket = new WebSocket(url);
+                    //消息处理
+                    this.webSocket.onmessage = function (evt) {
+                        console.log("onmessage", evt.data)
+                        if (evt.data.indexOf("}") > -1) {
+                            console.log("recv json <==" + evt.data)
+                            this.onmessage(JSON.parse(evt.data));
+                        } else {
+                            console.log("recv<==" + evt.data)
+                        }
+                    }.bind(this)
+                    //关闭回调
+                    this.webSocket.onclose = function (evt) {
+                        console.log("您已自动下线") //code 1006
+                    }
+                    //出错回调
+                    this.webSocket.onerror = function (evt) {
+                        console.log(evt.data)
+                    }
+                },
+                sendmsg: function () {
+
+                },
+                loadfriends: function () {
+                    var that = this;
+                    post("v1/user/friend/list", { userid: userid() }, function (res) {
+                        that.friends = res.rows || [];
+                        var usermap = this.usermap;
+                        for (var i in res.rows) {
+                            var k = "" + res.rows[i].userid
+                            usermap[k] = res.rows[i];
+                        }
+                        this.usermap = usermap;
+                    }.bind(this))
+                },
+                loadcommunitys: function () {
+                    var that = this;
+                    post("v1/user/community/list", { ownerId: userid() }, function (res) {
+                        that.communitys = res.rows || [];
+                    })
+                },
+                addfriend: function () {
+                    var that = this;
+                    mui.prompt('', '请输入好友ID', '添加好友', ['取消', '确认'], function (e) {
+                        if (e.index == 1) {
+                            //判断数字
+                            //if (isNaN(e.value) || e.value <= 0) {
+                            //    mui.toast('格式错误');
+                            //} else {
+                            //mui.toast(e.value);
+                            that._addfriend(e.value)
+                            //}
+                        } else {
+                            //mui.toast('您取消了入库');
+                        }
+                    }, 'div');
+                    document.querySelector('.mui-popup-input input').type = 'text';
+                },
+                _addfriend: function (dstobj) {
+                    //防止一次点击 穿透访问多次
+                    if (this.isDisable) {
+                        this.setTimeFlag()
+                        //console.log("_addfriend....")
+                        var that = this
+                        post("v1/user/friend", { dstobj: dstobj, userid: userid() }, function (res) {
+                            if (res.code == 0) {
+                                mui.toast("添加成功");
+                                that.loadfriends(); // 刷新好友
+                            } else {
+                                mui.toast(res.message);
+                            }
+                        })
+                    }
+                },
+                //个人资料修改显示
+                setUserInfo: function () {
+                    this.win = "userinfo"
+                    //  console.log("createCom")
+                },
+                //新建群显示
+                createCom: function () {
+                    this.win = "community"
+                    //  console.log("createCom")
+                },
+
+                //新建群提交
+                createcommunity() {
+                    //console.log("createcommunity")
+                    this.com.ownerId = userid()
+                    console.log(this.com)
+                    util.post("/v1/user/community", this.com).then(res => {
+                        console.log(res)
+                        if (res.code != 0) {
+                            mui.toast(res.message)
+                        } else {
+                            //location.replace("localhost:8081")
+                            //location.href = "/"
+                            mui.toast("建群成功")
+                            this.loadcommunitys();
+                            //goBack()
+                        }
+                    })
+                },
+                updateUserInfo() {
+                    //console.log("createcommunity")
+                    this.info.id = userid()
+                    util.post("/v1/user/update", this.info).then(res => {
+                        console.log(res)
+                        let userInfo = JSON.parse(sessionStorage.getItem('userinfo') || '{}');
+                        userInfo.Avatar = this.info.icon;
+                        userInfo.Name = this.info.name;
+                        sessionStorage.setItem('userinfo', JSON.stringify(userInfo))
+                        if (res.code != 0) {
+                            mui.toast(res.message)
+                        } else {
+                            //location.replace("localhost:8081")
+                            //location.href = "/"
+                            mui.toast("修改成功")
+                            //goBack()
+                        }
+                    })
+                },
+
+                //回到聊天首页
+                goBack() {
+                    this.win = "main"
+                },
+
+                _joincomunity: function (dstobj) {
+                    if (this.isDisable) {
+                        this.setTimeFlag();
+                        var that = this;
+                        console.log(that);
+                        post("v1/user/community/add", { dstobj: dstobj, "ownerid": userid() }, function (res) {
+                            if (res.code == 0) {
+                                mui.toast("添加成功");
+                                that.loadcommunitys();
+                            } else {
+                                mui.toast(res.message);
+                            }
+                        })
+                    }
+                },
+                joinCom: function () {
+                    var that = this;
+                    mui.prompt('', '请输入群号', '加群', ['取消', '确认'], function (e) {
+                        if (e.index == 1) {
+                            //    if (isNaN(e.value) || e.value <= 0) {
+                            //       mui.toast('格式错误');
+                            //   } else {
+                            //mui.toast(e.value);
+                            that._joincomunity(e.value)
+                            // }
+                        } else {
+                            //mui.toast('您取消了入库');
+                        }
+                    }, 'div');
+                    document.querySelector('.mui-popup-input input').type = 'text';
+                },
+                quit: function () {
+                    sessionStorage.removeItem("userid")
+                    sessionStorage.removeItem("userinfo")
+                    location.href = "/"
+                },
+                setTimeFlag() {
+                    this.isDisable = false;
+                    setTimeout(() => {
+                        this.isDisable = true;
+                    }, 100)
+                },
+                heartbeat() {
+                    if (this.webSocket.readyState == 1) {  // = 3表示，失去连接
+                        var msg = this.createmsgcontext();
+                        msg.media = -1;
+                        msg.msg_type = 3
+                        msg.content = "心跳";
+                        //this.showmsg(userInfo(),msg);
+                        this.webSocket.send(JSON.stringify(msg))
+                    }
+                }
+            },
+            watch: {
+                "win": function (n, o) {
+                    // console.log("watch",o,n)
+                    if (n != "main") {
+                        document.getElementById("menubar").style.display = "none";
+                    } else {
+                        document.getElementById("menubar").style.display = "block";
+                    }
+                }
+            }
+        }
+    )
+</script>
+{{end}}
